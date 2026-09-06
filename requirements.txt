@@ -1,0 +1,12 @@
+# 跨平台核心依赖
+Pillow>=10.0
+requests>=2.31
+
+# 仅 Windows：窗口抓取（pywin32）
+pywin32>=306; sys_platform == "win32"
+
+# 仅 Windows：原生 Toast 通知（兼容 Win10/11，支持内联图片）
+win11toast>=0.35; sys_platform == "win32"
+
+# 图形界面（跨平台；Windows 需 Edge WebView2，Linux 需 GTK + WebKit2）
+pywebview>=5.0

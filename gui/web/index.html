@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vigil</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- 顶栏 -->
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-mark" id="brandMark"></span>
+      <span class="brand-name">Vigil</span>
+    </div>
+    <div class="top-status" id="topStatus">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">未启动</span>
+    </div>
+    <button class="btn-icon" id="btnSettings" title="设置" aria-label="设置">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
+  </header>
+
+  <!-- 主区 -->
+  <main id="main">
+
+    <!-- 左：窗口选择 -->
+    <section class="panel" id="panelWindows">
+      <div class="panel-head">
+        <h2>1 · 选择监控窗口</h2>
+        <button class="btn-ghost" id="btnRefresh" title="刷新窗口列表">刷新</button>
+      </div>
+      <div class="panel-body">
+        <input type="text" id="winFilter" placeholder="输入关键字过滤窗口…" autocomplete="off">
+        <div class="win-list" id="winList">
+          <div class="empty-hint">加载中…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右：巡检面板（标签页：巡检控制 / 告警历史） -->
+    <section class="panel" id="panelMonitor">
+      <div class="panel-tabs" id="monitorTabs">
+        <button class="tab active" data-tab="control" type="button">2 · 巡检控制</button>
+        <button class="tab" data-tab="history" type="button">
+          告警历史<span class="tab-badge" id="historyBadge" hidden>0</span>
+        </button>
+      </div>
+      <div class="panel-head">
+        <h2 id="monitorTabTitle">2 · 巡检控制</h2>
+        <div class="sel-info" id="selInfo">未选择窗口</div>
+      </div>
+      <div class="panel-body monitor-body" id="tabControl">
+
+        <div class="preview-wrap">
+          <div class="preview-empty" id="previewEmpty">
+            <span class="preview-glyph"></span>
+            <p>选择左侧窗口后点击「开始巡检」</p>
+          </div>
+          <img id="previewImg" alt="监控画面预览" hidden>
+        </div>
+
+        <div class="monitor-stats">
+          <div class="stat">
+            <div class="stat-num" id="statFrames">0</div>
+            <div class="stat-label">抓帧</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num" id="statCalls">0</div>
+            <div class="stat-label">AI 调用</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num" id="statSkips">0</div>
+            <div class="stat-label">跳过（未变化）</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num" id="statAlerts">0</div>
+            <div class="stat-label">告警</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="btn-primary" id="btnStart" disabled>开始巡检</button>
+          <button class="btn-ghost" id="btnStop" disabled>停止</button>
+          <button class="btn-ghost" id="btnTest" disabled>测试一次</button>
+          <button class="btn-ghost" id="btnSelfTest" title="诊断报警链路是否正常">自检</button>
+        </div>
+
+      </div>
+
+      <!-- 告警历史标签 -->
+      <div class="panel-body history-body" id="tabHistory" hidden>
+        <div class="history-bar">
+          <span class="history-total" id="historyTotal">共 0 条</span>
+          <button class="btn-ghost btn-sm" id="btnHistoryRefresh" type="button">刷新</button>
+          <button class="btn-ghost btn-sm btn-danger" id="btnHistoryClear" type="button">清空</button>
+        </div>
+        <div class="history-list" id="historyList">
+          <div class="empty-hint">暂无告警记录</div>
+        </div>
+        <p class="history-foot" id="historyPath"></p>
+      </div>
+    </section>
+  </main>
+
+  <!-- 底：事件流 -->
+  <footer id="eventbar">
+    <div class="event-head">
+      <h3>事件流</h3>
+      <span class="event-count" id="eventCount">0</span>
+      <span class="copyright">CaspianFlow.版权所有</span>
+    </div>
+    <div class="event-list" id="eventList">
+      <div class="empty-hint">暂无事件</div>
+    </div>
+  </footer>
+
+  <!-- 设置模态框 -->
+  <div class="modal-overlay" id="settingsOverlay" hidden>
+    <div class="modal" id="settingsModal" role="dialog" aria-label="设置">
+      <div class="modal-head">
+        <h3>设置</h3>
+        <button class="btn-icon" id="btnSettingsClose" aria-label="关闭">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>外观主题</label>
+          <div class="theme-picker" id="themePicker">
+            <label class="theme-opt">
+              <input type="radio" name="theme" value="auto" checked>
+              <span>跟随系统</span>
+            </label>
+            <label class="theme-opt">
+              <input type="radio" name="theme" value="light">
+              <span>浅色</span>
+            </label>
+            <label class="theme-opt">
+              <input type="radio" name="theme" value="dark">
+              <span>深色</span>
+            </label>
+          </div>
+          <p class="form-hint" id="themeHint">跟随系统</p>
+        </div>
+
+        <div class="form-group">
+          <label for="cfgApiKey">智谱 API Key</label>
+          <div class="input-with-action">
+            <input type="password" id="cfgApiKey" placeholder="粘贴你的智谱 API Key" autocomplete="off" spellcheck="false">
+            <button class="btn-ghost btn-sm" id="btnToggleKey" type="button">显示</button>
+          </div>
+          <p class="form-hint" id="cfgKeyHint">在 open.bigmodel.cn 控制台创建。仅保存在本地 config.json，不上传。</p>
+        </div>
+
+        <div class="form-group">
+          <label for="cfgAlertDir">异常图片保存目录</label>
+          <input type="text" id="cfgAlertDir" placeholder="例如：D:\Vigil\异常截图 或 alerts（相对路径）" autocomplete="off" spellcheck="false">
+          <p class="form-hint">每次检测到异常时自动保存当前画面截图到此目录。相对路径基于程序所在目录。</p>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cfgModelDaily">日常巡检模型</label>
+            <select id="cfgModelDaily">
+              <option value="glm-4.1v-thinking-flash">glm-4.1v-thinking-flash（免费·思考）</option>
+              <option value="glm-4.6v-flash">glm-4.6v-flash（免费·轻量）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="cfgModelRecheck">异常复核模型</label>
+            <select id="cfgModelRecheck">
+              <option value="glm-4.1v-thinking-flash">glm-4.1v-thinking-flash（免费·思考）</option>
+              <option value="glm-4.6v-flash">glm-4.6v-flash（免费·轻量）</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cfgInterval">抓帧间隔（秒）</label>
+            <input type="number" id="cfgInterval" min="1" max="3600" step="1">
+          </div>
+          <div class="form-group">
+            <label for="cfgDiffThreshold">变化触发阈值</label>
+            <input type="number" id="cfgDiffThreshold" min="0.0001" max="1" step="0.001">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cfgAlertConf">告警置信度阈值</label>
+            <input type="number" id="cfgAlertConf" min="0" max="1" step="0.05">
+          </div>
+          <div class="form-group">
+            <label for="cfgMinAlert">最小告警间隔（秒）</label>
+            <input type="number" id="cfgMinAlert" min="0" max="3600" step="1">
+          </div>
+        </div>
+
+        <p class="form-hint" id="cfgSaveHint"></p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" id="btnSettingsCancel">取消</button>
+        <button class="btn-primary" id="btnSettingsSave">保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自检弹窗 -->
+  <div class="modal-overlay" id="selftestOverlay" hidden>
+    <div class="modal modal-wide" id="selftestModal" role="dialog" aria-label="自检">
+      <div class="modal-head">
+        <h3>报警链路自检</h3>
+        <button class="btn-icon" id="btnSelfTestClose" aria-label="关闭">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="selftest-intro">
+          逐项检查报警链路的六个环节，定位「画面很乱却不报告」出在哪一步。
+        </p>
+        <label class="check-line">
+          <input type="checkbox" id="selftestFull" checked>
+          <span>完整自检（含模型判定与端到端演练，约 4~6 次模型调用；取消则只做配置与连通性检查）</span>
+        </label>
+        <div class="selftest-actions">
+          <button class="btn-primary btn-sm" id="btnSelfTestRun" type="button">开始自检</button>
+          <span class="selftest-status" id="selftestStatus">就绪</span>
+        </div>
+        <div class="selftest-steps" id="selftestSteps">
+          <div class="empty-hint">点击「开始自检」后，结果将逐项显示在这里。</div>
+        </div>
+        <div class="selftest-summary" id="selftestSummary" hidden></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" id="btnSelfTestCancel">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/gsap.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

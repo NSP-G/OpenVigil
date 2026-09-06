@@ -1,0 +1,21 @@
+{
+  "api_key": "",
+  "api_base": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+  "model_daily": "glm-4.1v-thinking-flash",
+  "model_recheck": "glm-4.1v-thinking-flash",
+  "capture_interval_sec": 5,
+  "diff_threshold": 0.004,
+  "alert_confidence": 0.45,
+  "min_alert_interval_sec": 20,
+  "activity_trigger": 0.12,
+  "heartbeat_frames": 20,
+  "keep_frames": false,
+  "local_guard_enabled": true,
+  "local_guard_cooldown_sec": 300,
+  "alert_image_dir": "alerts",
+  "alert_history_file": "alert_history.json",
+  "alert_history_max": 500,
+  "theme": "auto",
+  "log_dir": "logs",
+  "prompt": ""
+}
