@@ -26,3 +26,11 @@ Thumbs.db
 *.zip
 __pycache__/
 .pytest_cache/
+
+# 记忆系统运行时数据（含学生观测，不得进版本库）
+memory/
+environment.yml
+environment.yml.tmp
+alert_history.json
+# 外部 Markdown 记忆（由模型读写，含场景认知与位置行为，属隐私数据）
+memory/*.md

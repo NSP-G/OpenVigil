@@ -86,8 +86,29 @@ class AlertHistory:
             window_title=None, local_fallback=False):
         """追加一条告警记录，返回该记录（含生成的 id）。"""
         now = time.time()
+        # id 里的序号必须基于**重载之后**的记录数。
+        # 若在 _ensure_loaded() 之前取样，巡检线程刚写入的新告警会被算漏，
+        # 于是本次 id 与磁盘上已有记录撞号；界面拿 id 做列表 key，
+        # 重号会让两条告警在渲染时互相顶掉。
+        with self._lock:
+            self._ensure_loaded()
+            seq = len(self._records)
+            record = self._make_record(now, seq, type_, detail, confidence,
+                                       image_path, window_title, local_fallback)
+            self._records.append(record)
+            if len(self._records) > self.max_records:
+                self._records = self._records[-self.max_records:]
+            self._save_locked()
+        return record
+
+    def _make_record(self, now, seq, type_, detail, confidence,
+                     image_path, window_title, local_fallback):
+        """构造一条告警记录（id 保证在同进程内单调不重复）。"""
+        self._id_seq = max(getattr(self, "_id_seq", 0), seq) + 1
         record = {
-            "id": f"{int(now * 1000)}-{len(self._records)}",
+            # 用单调递增的 _id_seq 而非记录下标：下标在历史被裁剪后会回退，
+            # 毫秒时间戳撞车时就会生成完全相同的 id。
+            "id": f"{int(now * 1000)}-{self._id_seq}",
             "ts": now,
             "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
             "type": str(type_ or "未分类"),
@@ -97,12 +118,6 @@ class AlertHistory:
             "window": window_title or "",
             "local_fallback": bool(local_fallback),
         }
-        with self._lock:
-            self._ensure_loaded()
-            self._records.append(record)
-            if len(self._records) > self.max_records:
-                self._records = self._records[-self.max_records:]
-            self._save_locked()
         return record
 
     def list(self, limit=None, offset=0):

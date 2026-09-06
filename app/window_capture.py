@@ -131,14 +131,14 @@ def _print_window(hwnd, left, top, width, height, use_full_content=True):
             return None
         bmpinfo = bitmap.GetInfo()
         bmpstr = bitmap.GetBitmapBits(True)
+        bw, bh = bmpinfo["bmWidth"], bmpinfo["bmHeight"]
+        # BMP 每行字节数必须按 4 字节对齐。窗口宽度不是 4 的倍数时，
+        # 每行末尾会补 padding，而 frombuffer 传 stride=0 会按 width*4 计算，
+        # 于是从第二行起逐行错位——画面呈现为规律的斜向撕裂。
+        # 这种损坏很隐蔽：图看起来"能看"，但模型看到的是错乱内容。
+        stride = ((bw * 32 + 31) // 32) * 4
         image = Image.frombuffer(
-            "RGB",
-            (bmpinfo["bmWidth"], bmpinfo["bmHeight"]),
-            bmpstr,
-            "raw",
-            "BGRX",
-            0,
-            1,
+            "RGB", (bw, bh), bmpstr, "raw", "BGRX", stride, 1,
         )
         return image.copy()
     finally:

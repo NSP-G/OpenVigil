@@ -358,13 +358,18 @@ class LocalGuard:
         self.streak = 0
         self.last_reason = reason
 
-    def note_normal_frame(self, activity):
-        """确认一帧为正常状态后调用，用于学习基线。
+    def note_normal_frame(self, activity, baseline=None):
+        """确认一帧为正常状态后调用：重置连续计数，并把样本纳入基线。
 
-        由上层在「模型判正常且画面无疑点」时调用，
-        保证基线只由正常样本构成。
+        此前这个函数只做了 self.streak = 0，名字和文档却都承诺"学习基线"，
+        且从未被任何生产代码调用——典型的名不副实。
+        基线实际是由 Monitor 直接调 analyzer.learn_baseline() 维护的，
+        这里保留该方法并补上它承诺的行为，避免在两处各写一套。
         """
         self.streak = 0
+        if baseline is not None and activity is not None:
+            baseline.learn(activity)
+        return self.streak
 
     def reset(self):
         self.streak = 0

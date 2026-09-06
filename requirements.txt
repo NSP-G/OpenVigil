@@ -1,6 +1,7 @@
 # 跨平台核心依赖
 Pillow>=10.0
 requests>=2.31
+PyYAML>=6.0
 
 # 仅 Windows：窗口抓取（pywin32）
 pywin32>=306; sys_platform == "win32"

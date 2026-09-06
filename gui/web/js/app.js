@@ -89,6 +89,20 @@
   };
 
   /* ---------- 工具 ---------- */
+  /** 安全绑定事件：元素缺失时只记一条警告，不中断后续绑定。
+      此前 20 多个监听器是连续裸调 addEventListener 的，
+      只要有一个 id 改了名或没渲染出来，就会抛 TypeError，
+      导致它后面的**所有**监听器都注册不上——界面半失灵，
+      而控制台之外没有任何提示，排查起来极其费劲。 */
+  function on(el, evt, handler) {
+    if (!el) {
+      console.warn("[Vigil] 事件绑定失败：元素不存在", evt);
+      return false;
+    }
+    el.addEventListener(evt, handler);
+    return true;
+  }
+
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
 
   /** 读取当前主题下某个 CSS 变量的真实值（供 GSAP 等需要具体色值的场合）。 */
@@ -771,18 +785,18 @@
   }
 
   /* ---------- 事件绑定 ---------- */
-  els.btnRefresh.addEventListener("click", refreshWindows);
-  els.btnStart.addEventListener("click", startMonitor);
-  els.btnStop.addEventListener("click", stopMonitor);
-  els.btnTest.addEventListener("click", testOnce);
-  els.winFilter.addEventListener("input", function () { renderWindows(els.winFilter.value); });
-  els.btnSettings.addEventListener("click", openSettings);
+  on(btnRefresh, "click", refreshWindows);
+  on(btnStart, "click", startMonitor);
+  on(btnStop, "click", stopMonitor);
+  on(btnTest, "click", testOnce);
+  on(winFilter, "input", function () { renderWindows(els.winFilter.value); });
+  on(btnSettings, "click", openSettings);
   // 关闭/取消均视为放弃修改，主题需还原；保存成功后由 saveSettings 主动置空
-  els.btnSettingsClose.addEventListener("click", function () { closeSettings(true); });
-  els.btnSettingsCancel.addEventListener("click", function () { closeSettings(true); });
-  els.btnSettingsSave.addEventListener("click", saveSettings);
-  els.btnToggleKey.addEventListener("click", toggleKeyVisibility);
-  els.settingsOverlay.addEventListener("click", function (e) {
+  on(btnSettingsClose, "click", function () { closeSettings(true); });
+  on(btnSettingsCancel, "click", function () { closeSettings(true); });
+  on(btnSettingsSave, "click", saveSettings);
+  on(btnToggleKey, "click", toggleKeyVisibility);
+  on(settingsOverlay, "click", function (e) {
     if (e.target === els.settingsOverlay) closeSettings(true);
   });
   // 主题：选了就立刻切换，所见即所得
@@ -795,19 +809,19 @@
   watchSystemTheme();
 
   // 标签页
-  els.monitorTabs.addEventListener("click", function (e) {
+  on(monitorTabs, "click", function (e) {
     var tab = e.target.closest ? e.target.closest(".tab") : null;
     if (tab && tab.dataset.tab) switchTab(tab.dataset.tab);
   });
   // 告警历史
-  els.btnHistoryRefresh.addEventListener("click", loadHistory);
-  els.btnHistoryClear.addEventListener("click", clearHistory);
+  on(btnHistoryRefresh, "click", loadHistory);
+  on(btnHistoryClear, "click", clearHistory);
   // 自检
-  els.btnSelfTest.addEventListener("click", openSelfTest);
-  els.btnSelfTestRun.addEventListener("click", runSelfTest);
-  els.btnSelfTestClose.addEventListener("click", closeSelfTest);
-  els.btnSelfTestCancel.addEventListener("click", closeSelfTest);
-  els.selftestOverlay.addEventListener("click", function (e) {
+  on(btnSelfTest, "click", openSelfTest);
+  on(btnSelfTestRun, "click", runSelfTest);
+  on(btnSelfTestClose, "click", closeSelfTest);
+  on(btnSelfTestCancel, "click", closeSelfTest);
+  on(selftestOverlay, "click", function (e) {
     if (e.target === els.selftestOverlay) closeSelfTest();
   });
 

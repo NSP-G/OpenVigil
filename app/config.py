@@ -26,6 +26,21 @@ DEFAULT_CONFIG = {
     "alert_history_max": 500,
     "theme": "auto",
     "log_dir": "logs",
+    # 多帧定向确认：仅在判为聚集/打闹时追问"在聚还是在散"。
+    # 不作为常规路径——多图会让思考型模型推理链暴涨导致输出截断。
+    "multi_frame_confirm": True,
+    # 多轮复演：初判异常时，让同一模型从多个角度独立评估再投票。
+    # 判断权在模型手里，基础系统只安排它怎么看，不替它下结论。
+    "deliberation_enabled": True,
+    # 离座走动的持续帧数门槛：低于此值只记录不告警。
+    # 交作业、扔垃圾都会造成短暂离座，一帧就告警会搅得课堂不得安宁。
+    # 此前这项只存在于 Monitor 的 cfg.get 默认值里，没进 DEFAULT_CONFIG，
+    # 导致写在 config.json 里也会被 load_config 的遍历逻辑忽略，改了没用。
+    "leave_seat_sustain": 3,
+    # 外部 Markdown 记忆：供模型读写的长期认知，会随观察不断进化。
+    # max_chars 是单个文件的字符上限，超限交给模型自己压缩。
+    "memory_root": "memory",
+    "memory_max_chars": 4000,
     "prompt": "",
 }
 
@@ -42,8 +57,11 @@ _NUMERIC_FIELDS = {
     "min_alert_interval_sec": (0.0, 86400.0),
     "activity_trigger": (0.0, 1.0),
     "heartbeat_frames": (1.0, 10000.0),
+    "leave_seat_sustain": (1.0, 1000.0),
     "alert_history_max": (10.0, 100000.0),
     "local_guard_cooldown_sec": (0.0, 86400.0),
+    # 记忆文件上限：太小会频繁压缩（丢细节），太大会挤爆上下文窗口
+    "memory_max_chars": (500.0, 40000.0),
 }
 
 DEFAULT_PROMPT = (
@@ -119,6 +137,32 @@ def _coerce_theme(value):
     return DEFAULT_THEME
 
 
+# 开关型配置项（手改配置时可能被写成 "true"/"1"/"开" 等）。
+# 此前这些新项走的是 else 分支直接赋值，任何脏值都会被原样接受。
+_BOOL_FIELDS = (
+    "keep_frames", "local_guard_enabled", "multi_frame_confirm",
+    "deliberation_enabled",
+)
+# 路径型配置项：必须是非空字符串，否则拼接时会崩溃
+_PATH_FIELDS = ("memory_root", "log_dir", "alert_image_dir",
+                "alert_history_file")
+
+
+def _coerce_bool(value):
+    """把各种开关写法规范成 bool；无法识别时返回 None（调用方保留默认值）。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "y", "on", "开", "是"):
+            return True
+        if v in ("false", "0", "no", "n", "off", "关", "否"):
+            return False
+    return None
+
+
 def _coerce_numeric(key, value):
     """数值配置项做类型转换与范围钳制；无法转换时返回 None（调用方保留默认值）。"""
     try:
@@ -185,6 +229,21 @@ def load_config(path=None):
                 errors.append(
                     f"配置项 local_guard_enabled 的值 {value!r} 非法，已保持默认值。"
                 )
+        elif key in _BOOL_FIELDS:
+            parsed = _coerce_bool(value)
+            if parsed is None:
+                errors.append(
+                    f"配置项 {key} 的值 {value!r} 不是合法开关值，已保持默认值。")
+            else:
+                cfg[key] = parsed
+        elif key in _PATH_FIELDS:
+            # 路径类必须是非空字符串。手改配置写成数字的话，
+            # 后面 os.path.join(123, ...) 会直接抛 TypeError 崩溃。
+            if isinstance(value, str) and value.strip():
+                cfg[key] = value.strip()
+            else:
+                errors.append(
+                    f"配置项 {key} 的值 {value!r} 不是合法路径，已保持默认值。")
         elif isinstance(cfg[key], str) and not isinstance(value, str):
             errors.append(f"配置项 {key} 应为文本，已忽略非法值。")
         else:

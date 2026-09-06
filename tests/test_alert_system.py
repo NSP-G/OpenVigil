@@ -97,6 +97,18 @@ class FakeVisionClient:
         self.prompts = []    # 记录每次收到的提示词
 
     def analyze(self, image, prompt, model=None):
+        return self._reply(prompt, model)
+
+    def analyze_multi(self, frames, prompt, model=None):
+        """多帧分析：与单帧共用同一套回放脚本，便于测试时序路径。"""
+        return self._reply(prompt, model)
+
+    def analyze_diff(self, reference, current, prompt, model=None):
+        """场景差异描述：默认回复「无变化」，避免干扰主流程测试。"""
+        self.prompts.append(prompt)
+        return '{"changed": false, "changes": [], "confidence": 0.9}'
+
+    def _reply(self, prompt, model):
         self.prompts.append(prompt)
         idx = len(self.calls)
         self.calls.append(model)

@@ -23,7 +23,7 @@ import traceback
 from PIL import Image, ImageDraw
 
 from . import config as config_mod
-from . import diff_detect, notifier, window_capture
+from . import diff_detect, notifier
 from .monitor import Monitor
 from .zhipu_client import ZhipuVisionClient, ZhipuError, parse_verdict
 
@@ -345,7 +345,6 @@ class SelfTest:
             for i in range(_E2E_FRAMES + 2)
         ]
         cursor = {"i": 0}
-        original_capture = window_capture.capture_window
 
         def fake_capture(hwnd):
             f = frames[min(cursor["i"], len(frames) - 1)]
@@ -354,18 +353,26 @@ class SelfTest:
 
         # 自检是演练，必须与用户数据完全隔离：
         #   - 异常截图写到临时目录，跑完即删
-        #   - 告警历史也指向临时文件，避免把假告警混进用户的历史栏目
+        #   - 告警历史指向临时文件，避免假告警混进用户的历史栏目
+        #   - 观测日志与外部记忆也必须落在临时目录：Monitor 默认把
+        #     memory/ 与 environment.yml 建在项目根下，若不隔离，
+        #     自检的合成画面观测会写进用户**真实**的日志和模型记忆里，
+        #     把演练数据混进真实记录，事后还无法区分。
         #   - 关闭系统通知，否则一次自检会连弹好几条 Toast
         tmpdir = tempfile.mkdtemp(prefix="vigil_selftest_")
         cfg = dict(self.cfg)
         cfg["alert_image_dir"] = tmpdir
         cfg["alert_history_file"] = os.path.join(tmpdir, "alert_history.json")
         cfg["min_alert_interval_sec"] = 0  # 自检时不做通知节流
+        cfg["memory_root"] = os.path.join(tmpdir, "memory")
 
         mon = None
         try:
-            window_capture.capture_window = fake_capture
-            mon = Monitor(cfg, _FakeWindow(), verbose=False, alert_notify=False)
+            mon = Monitor(cfg, _FakeWindow(), verbose=False, alert_notify=False,
+                          root=tmpdir)
+            # 实例级替换抓帧函数——绝不能猴子补丁 window_capture 模块，
+            # 自检跑在后台线程，那样会连同时进行的真实巡检一起污染。
+            mon._capture_fn = fake_capture
             mon.client = self.client  # 复用已验证可用的客户端
             last = None
             total = _E2E_BASELINE_FRAMES + _E2E_FRAMES
@@ -395,10 +402,14 @@ class SelfTest:
                        f"执行异常：{type(e).__name__}: {e}",
                        _clip(traceback.format_exc(limit=2), 200))
         finally:
-            window_capture.capture_window = original_capture
             if mon is not None:
                 try:
-                    mon.close()
+                    # 必须 shutdown：停掉后台索引线程并 flush。
+                    # 只 close() 的话，每次自检都会留下一个空转的重建线程。
+                    # 注意不能让它关掉复用的 self.client——那个连接还要留给后续步骤，
+                    # 这里先摘开再释放。
+                    mon.client = None
+                    mon.shutdown()
                 except Exception:
                     pass
             # 清理自检产生的临时截图

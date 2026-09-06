@@ -183,6 +183,18 @@ class FakeClient:
         self.calls = []
 
     def analyze(self, image, prompt, model=None):
+        return self._reply(prompt)
+
+    def analyze_multi(self, frames, prompt, model=None):
+        """多帧分析：与单帧共用回放脚本。"""
+        return self._reply(prompt)
+
+    def analyze_diff(self, reference, current, prompt, model=None):
+        """场景差异描述：默认「无变化」。"""
+        self.calls.append(prompt)
+        return '{"changed": false, "changes": [], "confidence": 0.9}'
+
+    def _reply(self, prompt):
         self.calls.append(prompt)
         if self.raise_error is not None:
             raise self.raise_error

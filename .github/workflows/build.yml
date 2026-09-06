@@ -50,12 +50,34 @@ jobs:
           pyinstaller --noconfirm --clean --onefile --windowed --name Vigil `
             --paths . `
             --collect-all app `
+            --collect-all yaml `
             --add-data "gui/web;web" `
             --add-data "config.json;." `
             --hidden-import win32timezone `
             --collect-all webview `
             --icon "packaging/vigil.ico" `
             gui/main_gui.py
+
+      - name: Verify bundled dependencies
+        # continue-on-error：本步骤只是排查信息，绝不能反过来阻塞构建。
+        # 它已经连续三次让"打包成功、校验失败"的构建挂掉——
+        # 一个用于辅助排查的检查，不能比被检查的对象还脆弱。
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # v0.3 起新增 PyYAML 依赖（环境知识库与记忆系统用）。
+          # 若没打进 exe，程序会崩在 import yaml 上，
+          # 而源码侧的单元测试发现不了——测试跑在装好依赖的环境里。
+          #
+          # 内联执行而非落临时文件：Out-File 的编码/BOM 行为在
+          # 不同 PowerShell 版本间不一致，曾导致校验脚本自身解析失败，
+          # 校验步骤反倒成了构建的脆弱点。
+          #
+          # 局限：模块名多数被压缩进 PYZ 内部，不在明文区，
+          # 因此「扫不到」不等于「没打包」。本步骤只输出排查信息，
+          # 不作为构建通过与否的依据——真正保障依赖打包的是
+          # --collect-all 参数，其是否生效只能靠实机运行验证。
+          python -c "d=open(r'dist/Vigil.exe','rb').read(); print('exe 大小: %.1f MB' % (len(d)/1048576.0)); [print('  含 %-10s: %s' % (n, t in d)) for n, t in (('yaml', b'yaml'), ('webview', b'webview'), ('PIL', b'PIL'))]"
 
       - name: Verify artifact
         run: |
@@ -95,29 +117,11 @@ jobs:
           path: dist/Vigil-linux.tar.gz
           retention-days: 30
 
-  release:
-    name: Publish Windows Release
-    runs-on: ubuntu-latest
-    needs: windows
-    permissions:
-      contents: write
-    steps:
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: Vigil-windows
-          path: dist
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          TAG="win-build-${{ github.run_number }}"
-          echo "发布 tag: $TAG"
-          gh release delete "$TAG" --repo "${{ github.repository }}" --yes 2>/dev/null || true
-          gh release create "$TAG" dist/Vigil.exe \
-            --repo "${{ github.repository }}" \
-            --title "Vigil Windows · build ${{ github.run_number }}" \
-            --target "${{ github.sha }}" \
-            --notes "GitHub Actions 自动构建（run #${{ github.run_number }}）。下载 Vigil.exe 后直接运行即可。"
+# ---------------------------------------------------------------------------
+# 注意：公开仓库不自动发布 Release。
+#
+# 正式版（v0.x）的 exe 由维护者从私有仓库已验证的 beta 构建人工挂载，
+# 避免每次同步都在 Releases 页面留下一个 win-build-N 噪音标签。
+# 本 workflow 在此只承担 CI 职责：跑单元测试 + 验证能打包出 exe，
+# 产物保留 30 天供排查。
+# ---------------------------------------------------------------------------

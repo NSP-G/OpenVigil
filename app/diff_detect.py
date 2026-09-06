@@ -80,6 +80,149 @@ def _clamp01(v):
     return 0.0 if v < 0.0 else (1.0 if v > 1.0 else float(v))
 
 
+def scene_hash(image, size=(16, 16)):
+    """计算场景感知哈希，用于检测环境的**持久性**变化。
+
+    与 mean_abs_diff 的区别：
+        mean_abs_diff 衡量「画面变了多少」——有人走过就跳；
+        scene_hash    衡量「场景布局是不是同一个」——人走过不影响，
+                      但墙上新贴一张分组表、桌椅被挪动就会改变。
+
+    实现为简化版感知哈希：缩到 16×16 灰度，以均值为基准逐位二值化，
+    得到 256 bit 指纹。纯本地计算，零成本。
+    """
+    try:
+        gray = image.convert("L").resize(size, Image.Resampling.BILINEAR)
+        pixels = list(gray.getdata())
+        avg = sum(pixels) / len(pixels)
+        bits = 0
+        for p in pixels:
+            bits = (bits << 1) | (1 if p > avg else 0)
+        return "%016x" % bits
+    except Exception:
+        return None
+
+
+def hamming_distance(hash_a, hash_b):
+    """两个场景哈希的汉明距离（0=完全相同，越大差异越明显）。"""
+    if not hash_a or not hash_b or len(hash_a) != len(hash_b):
+        return None
+    try:
+        return bin(int(hash_a, 16) ^ int(hash_b, 16)).count("1")
+    except (ValueError, TypeError):
+        return None
+
+
+class SceneChangeDetector:
+    """持续性局域变化检测器：识别「墙上新贴了东西」这类环境变化。
+
+    ==========================================================================
+    为什么不用全局感知哈希
+    ==========================================================================
+
+    实测结论：全局感知哈希（无论 aHash 还是 dHash、无论 16×16 还是 64×64）
+    都对「墙上多一张分组表」极不敏感——贴表造成的哈希距离（1~12）
+    甚至小于正常画面抖动（3~10），因为整幅图的均值被课桌和人占据，
+    一小块浅色张贴物根本撬不动全局阈值。
+
+    ==========================================================================
+    真正的区分点：持续性 + 空间集中
+    ==========================================================================
+
+        贴了一张表   → 同一小块区域，每一帧都在变（持续、集中）
+        画面抖动     → 每帧变的地方都不一样（随机、分散）
+        学生离座     → 座位空出来，差异铺满整个 seating 区（持续但分散）
+
+    于是判据有两条：
+        ① 持续性：同一格连续多帧都被判为「有差异」
+        ② 紧凑度：被标记的区域集中成一小块，而不是铺开一大片
+
+    ==========================================================================
+    一个容易踩的数学坑
+    ==========================================================================
+
+    累加器 p ← p×decay + 1 的稳态上限是 1/(1-decay)。
+    若 decay=0.6，上限仅 2.5——把 need 设成 3.0 的话，
+    这个条件**永远不可能被满足**，功能静默失效且毫无报错。
+    因此 need 必须显著低于稳态上限（这里取 2.0 vs 上限 2.5）。
+    """
+
+    GRID_W = 64
+    GRID_H = 40
+
+    def __init__(self, cell_threshold=8, decay=0.6, need=2.0,
+                 min_cells=12, min_fill=0.45):
+        self.cell_threshold = cell_threshold   # 单格亮度差超过多少算「有变化」
+        self.decay = decay                     # 历史持续度的衰减系数
+        self.need = need                       # 达到多少才算「持续变化」
+        self.min_cells = min_cells             # 至少多少格同时命中
+        self.min_fill = min_fill               # 紧凑度下限（命中格数 / 外接框面积）
+        self.reference = None                  # 基准网格
+        self.persistence = None                # 每格的持续度
+        self.reset_count = 0
+
+    @property
+    def steady_state_max(self):
+        """累加器的数学上限，用于自检 need 是否设得不可达。"""
+        return 1.0 / (1.0 - self.decay) if self.decay < 1.0 else float("inf")
+
+    def _grid(self, image):
+        """把画面降采样成亮度网格。"""
+        gray = image.convert("L").resize(
+            (self.GRID_W, self.GRID_H), Image.Resampling.BILINEAR)
+        return list(gray.getdata())
+
+    def update(self, image):
+        """上报一帧，返回 None 或变化描述。
+
+        返回示例：
+            {"cells": 71, "fill": 0.78, "bbox": (x, y, w, h)}
+        """
+        grid = self._grid(image)
+        if self.reference is None:
+            self.reference = grid
+            self.persistence = [0.0] * len(grid)
+            return None
+
+        self.persistence = [
+            p * self.decay + (1.0 if abs(a - b) >= self.cell_threshold else 0.0)
+            for p, a, b in zip(self.persistence, grid, self.reference)
+        ]
+
+        idx = [i for i, p in enumerate(self.persistence) if p >= self.need]
+        if len(idx) < self.min_cells:
+            return None
+
+        # 紧凑度：命中格集中成块（贴表）还是铺满一片（人员流动）
+        xs = [i % self.GRID_W for i in idx]
+        ys = [i // self.GRID_W for i in idx]
+        bw = max(xs) - min(xs) + 1
+        bh = max(ys) - min(ys) + 1
+        fill = len(idx) / float(bw * bh)
+        if fill < self.min_fill:
+            return None
+
+        return {
+            "cells": len(idx),
+            "fill": round(fill, 3),
+            "bbox": (min(xs), min(ys), bw, bh),
+        }
+
+    def reset_reference(self, image=None):
+        """重置基准。
+
+        两种时机：
+          1. 变化已被模型描述并记入环境文件——基准推进到当前状态
+          2. 模型说「无变化」——说明是误触发，重置避免反复调用
+        """
+        if image is not None:
+            self.reference = self._grid(image)
+            self.persistence = [0.0] * len(self.reference)
+        elif self.reference is not None:
+            self.persistence = [0.0] * len(self.reference)
+        self.reset_count += 1
+
+
 class ActivityAnalyzer:
     """本地活动度分析器（纯本地计算，不调用 API，零成本）。
 

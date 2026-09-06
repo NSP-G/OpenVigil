@@ -17,5 +17,9 @@
   "alert_history_max": 500,
   "theme": "auto",
   "log_dir": "logs",
+  "multi_frame_confirm": true,
+  "deliberation_enabled": true,
+  "memory_root": "memory",
+  "memory_max_chars": 4000,
   "prompt": ""
 }

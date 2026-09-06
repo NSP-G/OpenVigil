@@ -84,7 +84,12 @@ def main():
 
     if args.once:
         print("正在抓帧并分析一次…")
-        result = monitor.analyze_once()
+        try:
+            result = monitor.analyze_once()
+        finally:
+            # 必须 shutdown：它会停掉后台索引线程并 flush 环境知识库。
+            # 直接 return 的话，本次分析产生的统计与认知还没落盘就随进程消失。
+            monitor.shutdown()
         print("结果：", result)
         return
 
@@ -93,6 +98,8 @@ def main():
     except KeyboardInterrupt:
         print("\n收到退出信号，正在停止…")
         monitor.stop()
+    finally:
+        monitor.shutdown()
 
 
 if __name__ == "__main__":

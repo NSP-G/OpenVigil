@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import threading
+import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -60,6 +61,10 @@ class Bridge:
         # 告警历史独立于巡检实例，未巡检时也能查看既往记录
         self._history = None
         self._history_path = None
+        # 配置缓存：历史轮询每 2 秒一次，若每次都重新读盘解析 config.json，
+        # 等于给本就频繁的 IO 再叠一层。配置变更走 save_config 主动失效。
+        self._cfg_cache = None
+        self._last_preview_ts = 0.0
 
     # ---- JS 可调用的接口 ----
     def list_windows(self):
@@ -76,7 +81,7 @@ class Bridge:
         with self._lock:
             if self._monitor is not None:
                 return {"ok": False, "error": "已在巡检中"}
-            cfg, _errors = config_mod.load_config()
+            cfg = self._get_config()
             if not cfg.get("api_key"):
                 return {"ok": False, "error": "config.json 未填写 API Key，请先在设置中填写。"}
             win = self._find_window(hwnd)
@@ -112,6 +117,10 @@ class Bridge:
             if thread.is_alive():
                 # 可能正在等待一次 API 返回；不阻塞界面，线程为 daemon 会自行结束
                 notifier.get_logger().warning("巡检线程未在 5 秒内退出，将在当前分析结束后自行停止。")
+            try:
+                monitor.shutdown()
+            except Exception:
+                pass
             monitor.close()
             self._monitor = None
             self._stop_event = None
@@ -122,7 +131,7 @@ class Bridge:
         """选窗口后立即抓帧分析一次，返回判定结果。任何异常都转为结构化错误，不抛给 JS。"""
         monitor = None
         try:
-            cfg, _errors = config_mod.load_config()
+            cfg = self._get_config()
             if not cfg.get("api_key"):
                 return {"ok": False, "error": "config.json 未填写 API Key，请先在设置中填写。"}
             win = self._find_window(hwnd)
@@ -130,7 +139,12 @@ class Bridge:
                 return {"ok": False, "error": "窗口不存在或已关闭"}
             log_dir = config_mod.ensure_dirs(cfg)
             notifier.init(log_dir)
-            monitor = Monitor(cfg, win, verbose=False, preview_cb=self._push_frame)
+            # alert_notify=False：单次测试只是为了看判定效果，
+            # 若沿用默认 True，一旦判异常就会弹出**真实的系统告警通知**，
+            # 用户点一下"测试"收到一条告警，会以为是真出事了。
+            monitor = Monitor(cfg, win, verbose=False,
+                              preview_cb=self._push_frame,
+                              alert_notify=False)
             result = monitor.analyze_once()
             result["ok"] = True
             return result
@@ -139,6 +153,14 @@ class Bridge:
             return {"ok": False, "error": f"测试失败：{e}"}
         finally:
             if monitor is not None:
+                # Monitor 构造时会启动后台索引线程（rebuild_async），
+                # 它是 daemon 但不会因 close() 而停止。
+                # 每点一次"测试一次"就留下一个线程，反复点击会不断堆积。
+                # 这里显式通知索引器停止，再关闭连接。
+                try:
+                    monitor.shutdown()
+                except Exception:
+                    pass
                 monitor.close()
 
     def get_config(self):
@@ -148,7 +170,9 @@ class Bridge:
         masked = ("****" + key[-4:]) if len(key) > 4 else ("****" if key else "")
         return {
             "ok": True,
-            "config": {**cfg, "api_key": masked, "prompt": ""},  # 不把完整提示词回传前端
+            # 回传真实提示词，否则设置面板里这项永远显示为空，
+            # 用户既看不到当前值，也不知道自己改没改成功。
+            "config": {**cfg, "api_key": masked},
             "config_path": config_mod.writable_config_path(),
             "warnings": errors,
         }
@@ -158,8 +182,12 @@ class Bridge:
         if not isinstance(data, dict):
             return {"ok": False, "error": "配置数据格式错误"}
         cfg, _ = config_mod.load_config()
-        # 前端不应回传 prompt；保留现有值
-        data.pop("prompt", None)
+        # 前端可能回传 prompt。空字符串表示"未修改/不关心"——
+        # 此时保留现有值；有内容则以用户填写为准。
+        # 此前无条件 pop 掉，导致提示词这项配置永远改不动。
+        incoming_prompt = data.pop("prompt", None)
+        if incoming_prompt and str(incoming_prompt).strip():
+            cfg["prompt"] = str(incoming_prompt).strip()
         for k, v in data.items():
             if k not in cfg:
                 continue
@@ -171,6 +199,8 @@ class Bridge:
             path = config_mod.save_config(cfg)
         except Exception as e:
             return {"ok": False, "error": f"保存失败：{e}（程序可能放在了只读目录，请移动到可写位置）"}
+        # 配置已变更，缓存必须失效，否则界面读到的仍是旧值
+        self._cfg_cache = dict(cfg)
         key_ok = bool(cfg.get("api_key"))
         return {
             "ok": True,
@@ -180,9 +210,16 @@ class Bridge:
         }
 
     # ---- 告警历史 ----
+    def _get_config(self):
+        """读取配置（带缓存）。保存设置时由 save_config 主动失效。"""
+        if self._cfg_cache is None:
+            cfg, _ = config_mod.load_config()
+            self._cfg_cache = cfg
+        return self._cfg_cache
+
     def _get_history(self):
         """按当前配置惰性创建/复用告警历史实例。"""
-        cfg, _ = config_mod.load_config()
+        cfg = self._get_config()
         path = cfg.get("alert_history_file") or "alert_history.json"
         if not os.path.isabs(path):
             path = os.path.join(config_mod._project_root(), path)
@@ -244,7 +281,7 @@ class Bridge:
         with self._selftest_lock:
             if self._selftest_thread is not None and self._selftest_thread.is_alive():
                 return {"ok": False, "error": "自检正在运行中，请等待完成。"}
-            cfg, _errors = config_mod.load_config()
+            cfg = self._get_config()
             tester = SelfTest(cfg, progress_cb=self._push_selftest_step, full=bool(full))
 
             def worker():
@@ -292,8 +329,17 @@ class Bridge:
             + json.dumps(payload, ensure_ascii=False) + ")"
         )
 
+    # 预览帧最小间隔（秒）。抓帧间隔可低至 0.5s，若每帧都把整张图
+    # base64 编码后经 evaluate_js 推给 WebView（单帧可达数十 KB 字符串），
+    # 界面会被持续拖慢。预览只是"看个大意"，不必跟上抓帧频率。
+    _PREVIEW_MIN_INTERVAL = 1.0
+
     def _push_frame(self, frame, stats):
-        """把预览帧推给前端（带统计数据）。"""
+        """把预览帧推给前端（带统计数据），并按最小间隔节流。"""
+        now = time.monotonic()
+        if now - self._last_preview_ts < self._PREVIEW_MIN_INTERVAL:
+            return
+        self._last_preview_ts = now
         try:
             data_url = _frame_to_data_url(frame)
         except Exception:
@@ -353,14 +399,23 @@ def detect_system_theme():
             return "dark" if "dark" in (out.stdout or "").lower() else "light"
         except Exception:
             return "dark"
-    # Linux / 其他：GTK 的深色偏好设置，读取失败则跟随环境变量兜底
+    # Linux / 其他：优先读 GTK 的深色偏好开关，再退而看主题名。
+    # 此前只读 gtk-theme，可很多深色主题名里并不带 "dark" 字样，
+    # 于是跟随系统这一档在 Linux 上基本是失效的。
     try:
         import subprocess
         out = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface",
+             "gtk-application-prefer-dark-theme"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if (out.stdout or "").strip().lower() == "true":
+            return "dark"
+        out2 = subprocess.run(
             ["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
             capture_output=True, text=True, timeout=5,
         )
-        return "dark" if "dark" in (out.stdout or "").lower() else "light"
+        return "dark" if "dark" in (out2.stdout or "").lower() else "light"
     except Exception:
         return "dark"
 
