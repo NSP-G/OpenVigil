@@ -758,3 +758,85 @@ html, body {
 .selftest-summary.overall-pass { background: var(--ok-dim); color: var(--ok); border-color: var(--ok); }
 .selftest-summary.overall-warn { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
 .selftest-summary.overall-fail { background: var(--alert-dim); color: var(--alert); border-color: var(--alert); }
+
+/* ============================================================
+   捕获源切换 + 屏幕区域框选
+   用途：窗口枚举找不到监控软件（无标题栏/工具窗口被过滤）时，
+        改用屏幕区域直接框选画面，绕开枚举。
+   ============================================================ */
+.source-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.src-tab {
+  flex: 0 0 auto;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--font-cn);
+  color: var(--text-dim);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.src-tab:hover { color: var(--text); border-color: var(--border-strong); }
+.src-tab.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.btn-diag { margin-left: auto; font-size: 12px; padding: 5px 10px; }
+
+.hint-text {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.region-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.region-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--font-cn);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.region-readout {
+  flex: 1 1 auto;
+  font-size: 12px;
+  font-family: var(--font-num);
+  color: var(--text-dim);
+}
+
+.region-picker { margin-top: 8px; }
+.region-canvas {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: crosshair;
+  user-select: none;
+}
+.region-canvas img { max-width: 100%; height: auto; display: block; }
+.region-marquee {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
+  pointer-events: none;
+}
+.region-marquee[hidden] { display: none; }

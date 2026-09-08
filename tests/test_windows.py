@@ -125,3 +125,4 @@ class TestConfigWindowsPaths:
         loaded, _ = config_mod.load_config(path)
         assert loaded["api_key"] == "win-test-key"
         assert loaded["alert_image_dir"] == "C:\\Vigil\\alerts"
+

@@ -68,25 +68,127 @@ class Bridge:
 
     # ---- JS 可调用的接口 ----
     def list_windows(self):
-        """返回 [{hwnd, title}]，按窗口 Z 序。非 Windows 时返回空列表。"""
+        """返回窗口列表，按 Z 序。非 Windows 时返回空列表。
+
+        【修复】以前只返回 `{hwnd, title}`，且内部会因为"没有标题"
+        直接丢弃整个窗口——监控客户端普遍无标准标题栏，于是在列表里
+        永远找不到它。现在无标题窗口也会返回，并用类名/EXE 兜底显示，
+        保证老师在界面上"看得见、选得到"。
+        """
         try:
             wins = window_capture.list_windows()
         except Exception as e:
             self._push_status("error", f"窗口枚举不可用：{e}")
             return []
-        return [{"hwnd": w.hwnd, "title": w.title} for w in wins]
+        out = []
+        for w in wins:
+            out.append({
+                "hwnd": w.hwnd,
+                "title": w.title,
+                "cls": w.cls_name,
+                "exe": w.exe,
+                "pid": w.pid,
+                "display": window_capture.display_name(w),
+            })
+        return out
 
-    def start_monitor(self, hwnd):
-        """开始巡检指定窗口。hwnd 由前端从 list_windows 传入。"""
+    def list_monitors(self):
+        """返回显示器列表，供屏幕区域捕获选择。"""
+        try:
+            return window_capture.list_monitors()
+        except Exception as e:
+            return [{"error": str(e)}]
+
+    def capture_screen_preview(self, monitor_index=0, max_side=960):
+        """抓一整屏缩略图，供前端拖拽框选巡检区域。
+
+        返回 data URL。老师可以据此直接框出监控画面所在的矩形，
+        不必手输坐标。
+        """
+        try:
+            mons = window_capture.list_monitors()
+            if not mons:
+                return {"ok": False, "error": "未检测到显示器"}
+            idx = 0
+            try:
+                idx = max(0, min(int(monitor_index), len(mons) - 1))
+            except (TypeError, ValueError):
+                idx = 0
+            m = mons[idx]
+            img = window_capture.capture_screen_region(
+                m["left"], m["top"], m["width"], m["height"])
+            scale = min(1.0, float(max_side) / max(img.width, img.height))
+            if scale < 1.0:
+                img = img.resize((int(img.width * scale),
+                                  int(img.height * scale)))
+            import io as _io
+            import base64 as _b64
+            buf = _io.BytesIO()
+            img.save(buf, format="JPEG", quality=70)
+            return {
+                "ok": True,
+                "dataUrl": "data:image/jpeg;base64," +
+                           _b64.b64encode(buf.getvalue()).decode("ascii"),
+                "screen": m,
+                "preview_size": [img.width, img.height],
+            }
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def run_capture_diagnose(self):
+        """采集窗口枚举/抓屏诊断信息并落盘，供排查"列表找不到窗口"。
+
+        返回报告文件路径，老师把它发回即可定位原因，
+        不必反复试各种操作。
+        """
+        try:
+            report = window_capture.diagnose()
+            import json as _json
+            import os as _os
+            log_dir = _os.path.join("memory")
+            _os.makedirs(log_dir, exist_ok=True)
+            path = _os.path.abspath(_os.path.join(log_dir,
+                                                  "capture_diagnose.json"))
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump(report, f, ensure_ascii=False, indent=2)
+            return {"ok": True, "path": path, "report": report}
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    def start_monitor(self, hwnd, region=None):
+        """开始巡检。
+
+        支持两种捕获源：
+          - 窗口：传 hwnd（region 为 None）
+          - 屏幕区域：hwnd 传 0，region 传 [left, top, width, height]
+
+        屏幕区域是**窗口枚举的兜底通道**：监控软件若在窗口列表里找不到
+        （无标题、工具窗口、被过滤），可以直接框选它所在的屏幕区域，
+        不再依赖枚举结果。
+        """
         with self._lock:
             if self._monitor is not None:
                 return {"ok": False, "error": "已在巡检中"}
             cfg = self._get_config()
             if not cfg.get("api_key"):
                 return {"ok": False, "error": "config.json 未填写 API Key，请先在设置中填写。"}
-            win = self._find_window(hwnd)
-            if win is None:
-                return {"ok": False, "error": "窗口不存在或已关闭"}
+
+            if region:
+                try:
+                    rect = [int(v) for v in region][:4]
+                    if len(rect) != 4 or rect[2] <= 0 or rect[3] <= 0:
+                        return {"ok": False, "error": "区域参数无效"}
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "区域参数无效"}
+                win = window_capture.WindowInfo(
+                    0, f"屏幕区域 {rect[2]}x{rect[3]}", "ScreenRegion")
+                source_desc = f"屏幕区域 {rect}"
+            else:
+                win = self._find_window(hwnd)
+                if win is None:
+                    return {"ok": False, "error": "窗口不存在或已关闭"}
+                source_desc = f"窗口：{win.title}"
+
             log_dir = config_mod.ensure_dirs(cfg)
             notifier.init(log_dir)
             monitor = Monitor(
@@ -95,6 +197,13 @@ class Bridge:
                 verbose=False,
                 preview_cb=self._push_frame,
             )
+            if region:
+                # 注入抓帧函数：忽略 hwnd，直接按区域抓屏
+                monitor._capture_fn = (
+                    lambda _h, _r=tuple(rect):
+                    window_capture.capture_screen_region(*_r)
+                )
+            self._source_desc = source_desc
             self._stop_event = threading.Event()
             self._thread = threading.Thread(
                 target=monitor.run_forever,

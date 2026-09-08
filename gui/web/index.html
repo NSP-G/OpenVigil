@@ -30,13 +30,48 @@
     <!-- 左：窗口选择 -->
     <section class="panel" id="panelWindows">
       <div class="panel-head">
-        <h2>1 · 选择监控窗口</h2>
+        <h2>1 · 选择监控画面</h2>
         <button class="btn-ghost" id="btnRefresh" title="刷新窗口列表">刷新</button>
       </div>
       <div class="panel-body">
-        <input type="text" id="winFilter" placeholder="输入关键字过滤窗口…" autocomplete="off">
-        <div class="win-list" id="winList">
-          <div class="empty-hint">加载中…</div>
+        <!-- 捕获源切换：窗口枚举找不到时（如监控软件无标题栏），
+             可改用屏幕区域框选，直接绕开枚举 -->
+        <div class="source-switch" id="sourceSwitch">
+          <button class="src-tab active" data-src="window" type="button">窗口列表</button>
+          <button class="src-tab" data-src="region" type="button">屏幕区域</button>
+          <button class="btn-ghost btn-diag" id="btnDiagnose" type="button"
+                  title="生成窗口枚举诊断报告，便于排查"找不到监控软件"">诊断</button>
+        </div>
+
+        <!-- 窗口模式 -->
+        <div id="srcWindow">
+          <input type="text" id="winFilter" placeholder="输入关键字过滤窗口…" autocomplete="off">
+          <div class="win-list" id="winList">
+            <div class="empty-hint">加载中…</div>
+          </div>
+        </div>
+
+        <!-- 屏幕区域模式 -->
+        <div id="srcRegion" hidden>
+          <p class="hint-text">
+            窗口列表里找不到监控软件时，可直接框选它所在的屏幕区域。
+            此方式不依赖窗口枚举，也不要求窗口有标题。
+          </p>
+          <div class="region-row">
+            <select id="monitorSelect"></select>
+            <button class="btn-ghost" id="btnGrabScreen" type="button">抓取屏幕</button>
+          </div>
+          <div class="region-picker" id="regionPicker" hidden>
+            <div class="region-canvas" id="regionCanvas">
+              <img id="screenPreview" alt="屏幕预览">
+              <div class="region-marquee" id="regionMarquee" hidden></div>
+            </div>
+            <p class="hint-text">在预览图上按住鼠标拖出一个框，框住监控画面。</p>
+            <div class="region-row">
+              <span class="region-readout" id="regionReadout">尚未选择区域</span>
+              <button class="btn-ghost" id="btnClearRegion" type="button">清除</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>

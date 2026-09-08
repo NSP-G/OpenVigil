@@ -14,6 +14,12 @@
   var state = {
     windows: [],
     selected: null,        // {hwnd, title}
+    // 捕获源：window（窗口句柄）| region（屏幕区域）
+    // region 是窗口枚举的兜底通道——监控软件无标题栏时列表里找不到，
+    // 但画面在屏幕上可见，框选即可，不依赖枚举结果。
+    source: "window",
+    region: null,          // {left, top, width, height} 屏幕坐标
+    screenRect: null,      // 当前预览对应的显示器矩形，用于坐标换算
     running: false,
     selftestRunning: false,
     activeTab: "control",
@@ -22,6 +28,20 @@
   };
 
   var els = {
+    // ---- 捕获源 ----
+    sourceSwitch: document.getElementById("sourceSwitch"),
+    srcWindow: document.getElementById("srcWindow"),
+    srcRegion: document.getElementById("srcRegion"),
+    monitorSelect: document.getElementById("monitorSelect"),
+    btnGrabScreen: document.getElementById("btnGrabScreen"),
+    btnDiagnose: document.getElementById("btnDiagnose"),
+    regionPicker: document.getElementById("regionPicker"),
+    regionCanvas: document.getElementById("regionCanvas"),
+    screenPreview: document.getElementById("screenPreview"),
+    regionMarquee: document.getElementById("regionMarquee"),
+    regionReadout: document.getElementById("regionReadout"),
+    btnClearRegion: document.getElementById("btnClearRegion"),
+
     winList: document.getElementById("winList"),
     winFilter: document.getElementById("winFilter"),
     btnRefresh: document.getElementById("btnRefresh"),
@@ -164,7 +184,12 @@
     var list = state.windows;
     if (filter) {
       list = list.filter(function (w) {
-        return (w.title || "").toLowerCase().indexOf(filter) !== -1 ||
+        // 无标题窗口必须也能被搜到——监控软件恰恰没有标题，
+        // 只能靠类名或程序名（display 里已兜底）检索
+        return (w.display || "").toLowerCase().indexOf(filter) !== -1 ||
+               (w.title || "").toLowerCase().indexOf(filter) !== -1 ||
+               (w.cls || "").toLowerCase().indexOf(filter) !== -1 ||
+               (w.exe || "").toLowerCase().indexOf(filter) !== -1 ||
                String(w.hwnd).indexOf(filter) !== -1;
       });
     }
@@ -179,7 +204,8 @@
     list.forEach(function (w, i) {
       var item = document.createElement("div");
       item.className = "win-item";
-      if (state.selected && state.selected.hwnd === w.hwnd) item.classList.add("selected");
+      if (state.source === "window" && state.selected &&
+          state.selected.hwnd === w.hwnd) item.classList.add("selected");
       item.dataset.hwnd = w.hwnd;
       item.dataset.title = w.title || "";
 
@@ -189,8 +215,10 @@
 
       var title = document.createElement("span");
       title.className = "win-title";
-      title.textContent = w.title || "(无标题)";
-      title.title = w.title || "";
+      // 用后端算好的 display：无标题时退化为类名/程序名，
+      // 避免列表里出现一堆无法区分的"(无标题)"
+      title.textContent = w.display || w.title || "(无标题)";
+      title.title = [w.title, w.cls, w.exe].filter(Boolean).join("\n");
 
       var hwnd = document.createElement("span");
       hwnd.className = "win-hwnd";
@@ -202,14 +230,201 @@
 
       item.addEventListener("click", function () {
         if (state.running) return;
-        state.selected = { hwnd: w.hwnd, title: w.title || "(无标题)" };
+        state.source = "window";
+        state.selected = { hwnd: w.hwnd, title: w.display || w.title || "(无标题)" };
         renderWindows(els.winFilter.value);
-        els.selInfo.textContent = state.selected.title;
+        updateSelInfo();
         els.btnStart.disabled = false;
         els.btnTest.disabled = false;
       });
       els.winList.appendChild(item);
     });
+  }
+
+  function updateSelInfo() {
+    if (state.source === "region" && state.region) {
+      var r = state.region;
+      els.selInfo.textContent =
+        "屏幕区域 " + r.width + "×" + r.height + " @(" + r.left + "," + r.top + ")";
+    } else if (state.selected) {
+      els.selInfo.textContent = state.selected.title;
+    } else {
+      els.selInfo.textContent = "未选择监控画面";
+    }
+  }
+
+  function hasSelection() {
+    return state.source === "region"
+      ? !!(state.region && state.region.width > 0 && state.region.height > 0)
+      : !!state.selected;
+  }
+
+  /* ---------- 屏幕区域选择 ---------- */
+
+  function switchSource(src) {
+    state.source = src;
+    var tabs = els.sourceSwitch
+      ? els.sourceSwitch.querySelectorAll(".src-tab") : [];
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle("active", tabs[i].dataset.src === src);
+    }
+    els.srcWindow.hidden = (src !== "window");
+    els.srcRegion.hidden = (src !== "region");
+    if (src === "region" && els.monitorSelect &&
+        els.monitorSelect.options.length === 0) {
+      loadMonitors();
+    }
+    updateSelInfo();
+    // 切换源后按钮可用性要跟着变，否则会出现"选了区域却点不了开始"
+    els.btnStart.disabled = state.running || !hasSelection();
+    els.btnTest.disabled = state.running || !hasSelection();
+  }
+
+  async function loadMonitors() {
+    if (!api) return;
+    try {
+      var mons = await api.list_monitors();
+      els.monitorSelect.innerHTML = "";
+      if (!mons || !mons.length) {
+        els.monitorSelect.innerHTML = '<option value="0">默认显示器</option>';
+        return;
+      }
+      mons.forEach(function (m, i) {
+        var opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = (m.primary ? "主显示器" : "显示器 " + (i + 1)) +
+          " · " + m.width + "×" + m.height;
+        els.monitorSelect.appendChild(opt);
+      });
+    } catch (e) {
+      addEvent("获取显示器失败：" + e, "error");
+    }
+  }
+
+  async function grabScreen() {
+    if (!api) return;
+    var idx = els.monitorSelect ? parseInt(els.monitorSelect.value, 10) : 0;
+    els.btnGrabScreen.disabled = true;
+    addEvent("正在抓取屏幕…", "info");
+    try {
+      var res = await api.capture_screen_preview(idx || 0);
+      if (!res || res.ok === false) {
+        addEvent("抓屏失败：" + ((res && res.error) || "未知原因"), "error");
+        return;
+      }
+      els.screenPreview.src = res.dataUrl;
+      // 记下这张预览图对应的真实屏幕矩形，用于把框选坐标换算回去
+      state.screenRect = res.screen;
+      els.regionPicker.hidden = false;
+      addEvent("已抓取屏幕，请在图上拖框选中监控画面", "info");
+    } catch (e) {
+      addEvent("抓屏失败：" + e, "error");
+    } finally {
+      els.btnGrabScreen.disabled = false;
+    }
+  }
+
+  function clearRegion() {
+    state.region = null;
+    els.regionMarquee.hidden = true;
+    els.regionReadout.textContent = "尚未选择区域";
+    updateSelInfo();
+    els.btnStart.disabled = true;
+    els.btnTest.disabled = true;
+  }
+
+  function startMarquee(ev) {
+    ev.preventDefault();
+    if (!state.screenRect) return;
+    var canvas = els.regionCanvas;
+    var rect = canvas.getBoundingClientRect();
+    var x0 = ev.clientX - rect.left;
+    var y0 = ev.clientY - rect.top;
+    var marquee = els.regionMarquee;
+
+    function onMove(e) {
+      var x1 = e.clientX - rect.left;
+      var y1 = e.clientY - rect.top;
+      var left = Math.max(0, Math.min(x0, x1));
+      var top = Math.max(0, Math.min(y0, y1));
+      var w = Math.abs(x1 - x0);
+      var h = Math.abs(y1 - y0);
+      marquee.hidden = false;
+      marquee.style.left = left + "px";
+      marquee.style.top = top + "px";
+      marquee.style.width = w + "px";
+      marquee.style.height = h + "px";
+    }
+
+    function onUp(e) {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      var x1 = e.clientX - rect.left;
+      var y1 = e.clientY - rect.top;
+      var px = Math.max(0, Math.min(x0, x1));
+      var py = Math.max(0, Math.min(y0, y1));
+      var pw = Math.abs(x1 - x0);
+      var ph = Math.abs(y1 - y0);
+      if (pw < 8 || ph < 8) {
+        addEvent("框选区域过小，请重新拖框", "warn");
+        return;
+      }
+      // 预览图是屏幕等比缩放后的结果，必须换算回真实屏幕坐标，
+      // 否则抓帧会偏离实际位置（高分屏尤其明显）
+      var sr = state.screenRect;
+      var sx = pw / rect.width;
+      var sy = ph / rect.height;
+      var rx = px / rect.width;
+      var ry = py / rect.height;
+      state.region = {
+        left: Math.round(sr.left + rx * sr.width),
+        top: Math.round(sr.top + ry * sr.height),
+        width: Math.max(1, Math.round(sx * sr.width)),
+        height: Math.max(1, Math.round(sy * sr.height)),
+      };
+      els.regionReadout.textContent =
+        state.region.width + "×" + state.region.height +
+        " @(" + state.region.left + "," + state.region.top + ")";
+      updateSelInfo();
+      els.btnStart.disabled = state.running;
+      els.btnTest.disabled = state.running;
+      addEvent("已选择屏幕区域，可开始巡检", "info");
+    }
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  async function runDiagnose() {
+    if (!api) return;
+    els.btnDiagnose.disabled = true;
+    addEvent("正在生成窗口枚举诊断报告…", "info");
+    try {
+      var res = await api.run_capture_diagnose();
+      if (!res || res.ok === false) {
+        addEvent("诊断失败：" + ((res && res.error) || "未知原因"), "error");
+        return;
+      }
+      var missed = (res.report && res.report.missed_by_legacy) || [];
+      addEvent("诊断完成，报告：" + res.path, "info");
+      if (missed.length) {
+        // 直接把"被旧逻辑吞掉的窗口"列出来——
+        // 老师看到的就是"这个平时不在列表里"，一眼能对上
+        addEvent("发现 " + missed.length +
+          " 个此前被过滤掉的窗口（可能就是监控软件）", "warn");
+        missed.slice(0, 5).forEach(function (w) {
+          addEvent("  · " + (w.title || "(无标题)") +
+            " · " + (w.cls || "?") +
+            (w.exe ? " · " + w.exe.split(/[\\/]/).pop() : ""), "info");
+        });
+      } else {
+        addEvent("未发现被过滤的窗口；若仍找不到，建议改用「屏幕区域」", "info");
+      }
+    } catch (e) {
+      addEvent("诊断失败：" + e, "error");
+    } finally {
+      els.btnDiagnose.disabled = false;
+    }
   }
 
   async function refreshWindows() {
@@ -304,9 +519,16 @@
 
   /* ---------- 控制 ---------- */
   async function startMonitor() {
-    if (!api || !state.selected) return;
+    if (!api || !hasSelection()) return;
     try {
-      var res = await api.start_monitor(state.selected.hwnd);
+      // 区域模式：hwnd 传 0，区域作为参数。
+      // 后端据此改用屏幕抓帧，完全不经过窗口枚举——
+      // 这正是"列表里找不到监控软件"时的兜底路径。
+      var res = state.source === "region"
+        ? await api.start_monitor(0, [
+            state.region.left, state.region.top,
+            state.region.width, state.region.height])
+        : await api.start_monitor(state.selected.hwnd);
       if (res && res.ok === false) {
         addEvent("启动失败：" + (res.error || "未知原因"), "error");
       }
@@ -790,6 +1012,23 @@
   on(btnStop, "click", stopMonitor);
   on(btnTest, "click", testOnce);
   on(winFilter, "input", function () { renderWindows(els.winFilter.value); });
+
+  // ---- 捕获源：窗口 <-> 屏幕区域 ----
+  if (els.sourceSwitch) {
+    var srcTabs = els.sourceSwitch.querySelectorAll(".src-tab");
+    for (var si = 0; si < srcTabs.length; si++) {
+      srcTabs[si].addEventListener("click", function (e) {
+        switchSource(e.currentTarget.dataset.src);
+      });
+    }
+  }
+  on(btnDiagnose, "click", runDiagnose);
+  on(btnGrabScreen, "click", grabScreen);
+  on(btnClearRegion, "click", clearRegion);
+  // 框选：在预览图上拖拽画框
+  if (els.regionCanvas) {
+    els.regionCanvas.addEventListener("mousedown", startMarquee);
+  }
   on(btnSettings, "click", openSettings);
   // 关闭/取消均视为放弃修改，主题需还原；保存成功后由 saveSettings 主动置空
   on(btnSettingsClose, "click", function () { closeSettings(true); });
