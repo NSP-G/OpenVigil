@@ -70,8 +70,12 @@ jobs:
             Write-Error "未生成 dist/Vigil.exe"
             exit 1
           }
+          # 注意：-f 是**格式化运算符**，不是 Write-Host 的参数。
+          # 写成 `Write-Host "%.1f" -f $x` 会报"找不到接受参数 -f 的位置参数"，
+          # 校验步骤反倒把构建搞挂（本轮就是这样）。
+          # 正确写法：先做字符串格式化，再整体传给 Write-Host。
           $size = (Get-Item "dist/Vigil.exe").Length / 1MB
-          Write-Host "exe 大小: %.1f MB" -f $size
+          Write-Host ("exe 大小: {0:N1} MB" -f $size)
 
       - name: Publish release
         env:
