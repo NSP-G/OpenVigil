@@ -46,6 +46,11 @@
         <!-- 窗口模式 -->
         <div id="srcWindow">
           <input type="text" id="winFilter" placeholder="输入关键字过滤窗口…" autocomplete="off">
+          <label class="chk-line" title="某些监控软件平时隐藏窗口、只在托盘留图标，
+勾选后可把不可见窗口也列出来">
+            <input type="checkbox" id="chkHidden">
+            显示隐藏窗口
+          </label>
           <div class="win-list" id="winList">
             <div class="empty-hint">加载中…</div>
           </div>

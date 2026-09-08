@@ -122,3 +122,89 @@ class TestScreenRegionFallback:
         rep = window_capture.diagnose()
         if rep.get("pywin32"):
             assert "missed_by_legacy" in rep
+
+
+class TestBridgeWindowFields:
+    """GUI 层返回给前端的窗口字段必须完整。
+
+    前端 renderWindows 依赖 `w.display` 显示名称、
+    `w.flags` 标出可疑特征。后端少返回一个字段，
+    列表里就退化成一串无法区分的"(无标题)"——
+    老师看着像"监控软件不在列表里"，其实枚举早就抓到了它。
+
+    这类断链不会报错，只是信息不见了，因此必须在行为层测，
+    而不是只测 window_capture 本身。
+    """
+    def _bridge(self, monkeypatch, windows):
+        from gui import main_gui
+
+        monkeypatch.setattr(main_gui.window_capture, "list_windows",
+                            lambda **kw: windows)
+        return main_gui.Bridge(lambda: None)
+
+    def _fake(self, hwnd=1, title="", cls="Chrome_WidgetWin_1",
+              exe=r"C:\Program Files\NVR\client.exe", pid=4242,
+              visible=True, styles=None):
+        from app.window_capture import WindowInfo
+        return WindowInfo(hwnd, title, cls, pid=pid, exe=exe,
+                          visible=visible, styles=styles or {})
+
+    def test_display_name_present_for_untitled_window(self, monkeypatch):
+        """无标题窗口必须带上程序名，否则老师认不出哪个是监控画面。"""
+        b = self._bridge(monkeypatch, [self._fake()])
+        rows = b.list_windows()
+        assert len(rows) == 1
+        assert "display" in rows[0]
+        # 无标题时回退到 EXE 名，不能是空的或纯占位符
+        assert "client.exe" in rows[0]["display"]
+        assert rows[0]["display"] != "(无标题)"
+
+    def test_all_display_fields_returned(self, monkeypatch):
+        b = self._bridge(monkeypatch, [self._fake(title="监控画面")])
+        row = b.list_windows()[0]
+        for key in ("hwnd", "title", "cls", "exe", "pid",
+                    "display", "visible", "flags"):
+            assert key in row, f"返回字段缺少 {key}"
+
+    def test_flags_expose_why_window_is_hidden(self, monkeypatch):
+        """可疑特征要传给前端，帮老师在几十个条目里认出目标。"""
+        b = self._bridge(monkeypatch, [self._fake(
+            styles={"toolwindow": True, "has_caption": False})])
+        row = b.list_windows()[0]
+        assert "toolwindow" in row["flags"]
+
+    def test_children_enumerated_by_default(self, monkeypatch):
+        """默认枚举子窗口：监控画面常渲染在子窗口里，顶层只是空壳。"""
+        from app import window_capture
+        seen = {}
+
+        def fake(**kw):
+            seen.update(kw)
+            return []
+
+        monkeypatch.setattr(window_capture, "list_windows", fake)
+        from gui import main_gui
+        monkeypatch.setattr(main_gui.window_capture, "list_windows", fake)
+        main_gui.Bridge(lambda: None).list_windows()
+        assert seen.get("include_children") is True
+        assert seen.get("include_untitled") is True
+
+    def test_include_hidden_toggles_visible_only(self, monkeypatch):
+        """勾选"显示隐藏窗口"后必须真正放开可见性过滤。"""
+        from gui import main_gui
+        seen = {}
+
+        def fake(**kw):
+            seen.update(kw)
+            return []
+
+        monkeypatch.setattr(main_gui.window_capture, "list_windows", fake)
+        b = main_gui.Bridge(lambda: None)
+        b.list_windows()
+        assert seen.get("visible_only") is True
+        b.list_windows(include_hidden=True)
+        assert seen.get("visible_only") is False
+
+    def test_visible_flag_propagates(self, monkeypatch):
+        b = self._bridge(monkeypatch, [self._fake(visible=False)])
+        assert b.list_windows(include_hidden=True)[0]["visible"] is False

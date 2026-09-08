@@ -44,6 +44,7 @@
 
     winList: document.getElementById("winList"),
     winFilter: document.getElementById("winFilter"),
+    chkHidden: document.getElementById("chkHidden"),
     btnRefresh: document.getElementById("btnRefresh"),
     btnStart: document.getElementById("btnStart"),
     btnStop: document.getElementById("btnStop"),
@@ -199,6 +200,26 @@
       hint.className = "empty-hint";
       hint.textContent = filter ? "没有匹配的窗口" : "没有可用的窗口";
       els.winList.appendChild(hint);
+      // 空列表是最让人绝望的状态：用户不知道是程序坏了、
+      // 还是软件不支持，只能反复点刷新。
+      // 这里必须给出明确出路——屏幕区域不依赖枚举，永远可选。
+      var alt = document.createElement("button");
+      alt.className = "btn-ghost empty-action";
+      alt.type = "button";
+      alt.textContent = "改用屏幕区域框选 →";
+      alt.addEventListener("click", function () { switchSource("region"); });
+      els.winList.appendChild(alt);
+      if (!filter && els.chkHidden && !els.chkHidden.checked) {
+        var alt2 = document.createElement("button");
+        alt2.className = "btn-ghost empty-action";
+        alt2.type = "button";
+        alt2.textContent = "显示隐藏窗口";
+        alt2.addEventListener("click", function () {
+          els.chkHidden.checked = true;
+          refreshWindows();
+        });
+        els.winList.appendChild(alt2);
+      }
       return;
     }
     list.forEach(function (w, i) {
@@ -227,6 +248,23 @@
       item.appendChild(idx);
       item.appendChild(title);
       item.appendChild(hwnd);
+
+      // 标出"为什么这个窗口容易被别的工具漏掉"。
+      // 监控软件常常同时具备"无标题栏 + 工具窗口 + 隐藏"几个特征，
+      // 老师在几十个条目里靠这些标记才能认出目标。
+      if (w.flags && w.flags.length) {
+        var fl = document.createElement("span");
+        fl.className = "win-flags";
+        fl.textContent = w.flags.join("·");
+        fl.title = "该窗口具备这些特征，因此容易被其他工具过滤";
+        item.appendChild(fl);
+      }
+      if (w.visible === false) {
+        var hid = document.createElement("span");
+        hid.className = "win-flags win-hidden";
+        hid.textContent = "隐藏";
+        item.appendChild(hid);
+      }
 
       item.addEventListener("click", function () {
         if (state.running) return;
@@ -431,11 +469,18 @@
     if (!api) return;
     try {
       els.winList.innerHTML = '<div class="empty-hint">加载中…</div>';
-      state.windows = await api.list_windows();
+      var incHidden = !!(els.chkHidden && els.chkHidden.checked);
+      state.windows = await api.list_windows(incHidden);
       renderWindows(els.winFilter.value);
     } catch (e) {
       addEvent("刷新窗口失败：" + e, "error");
     }
+  }
+
+  if (els.chkHidden) {
+    els.chkHidden.addEventListener("change", function () {
+      refreshWindows();
+    });
   }
 
   /* ---------- 状态回调（Python → JS） ---------- */

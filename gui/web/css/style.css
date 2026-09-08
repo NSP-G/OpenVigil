@@ -840,3 +840,45 @@ html, body {
   pointer-events: none;
 }
 .region-marquee[hidden] { display: none; }
+
+/* ---------- 窗口列表：可疑特征标记 ---------- */
+/* 监控软件常同时具备"无标题栏 + 工具窗口 + 隐藏"几个特征，
+   这些标记帮老师在几十个条目里认出目标 */
+.win-item .win-flags {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  background: var(--panel-2);
+  white-space: nowrap;
+}
+/* 隐藏窗口用强调色标出：它在常规枚举里本就看不见，
+   必须用显著的视觉提示，否则老师会以为列表漏了 */
+.win-item .win-flags.win-hidden {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* 空列表时的出路按钮：不能让用户对着空列表干瞪眼 */
+.empty-action {
+  display: block;
+  width: 100%;
+  margin: 8px 0 0;
+  height: 30px;
+  font-size: 12px;
+}
+
+/* 显示隐藏窗口 开关 */
+.chk-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.chk-line input { cursor: pointer; }

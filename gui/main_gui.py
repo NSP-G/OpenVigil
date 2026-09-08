@@ -67,21 +67,35 @@ class Bridge:
         self._last_preview_ts = 0.0
 
     # ---- JS 可调用的接口 ----
-    def list_windows(self):
+    def list_windows(self, include_hidden=False):
         """返回窗口列表，按 Z 序。非 Windows 时返回空列表。
 
         【修复】以前只返回 `{hwnd, title}`，且内部会因为"没有标题"
         直接丢弃整个窗口——监控客户端普遍无标准标题栏，于是在列表里
         永远找不到它。现在无标题窗口也会返回，并用类名/EXE 兜底显示，
         保证老师在界面上"看得见、选得到"。
+
+        include_hidden：默认只列可见窗口。
+        有些监控系统平时把窗口藏起来、只在托盘留图标，
+        可见窗口里就怎么都找不到它。前端提供"显示隐藏窗口"开关，
+        勾选后连不可见窗口一并列出。
+
+        同时默认枚举**子窗口**：不少监控客户端把画面渲染在子窗口里
+        （顶层只是个无内容的壳），只列顶层会出现
+        "列表里能选中、抓出来却是空白"。
         """
         try:
-            wins = window_capture.list_windows()
+            wins = window_capture.list_windows(
+                visible_only=not include_hidden,
+                include_untitled=True,
+                include_children=True,
+            )
         except Exception as e:
             self._push_status("error", f"窗口枚举不可用：{e}")
             return []
         out = []
         for w in wins:
+            styles = getattr(w, "styles", {}) or {}
             out.append({
                 "hwnd": w.hwnd,
                 "title": w.title,
@@ -89,6 +103,10 @@ class Bridge:
                 "exe": w.exe,
                 "pid": w.pid,
                 "display": window_capture.display_name(w),
+                "visible": bool(getattr(w, "visible", True)),
+                # 标注"为什么它容易被别的工具漏掉"：
+                # toolwindow/noactivate/无标题栏/最小化 等
+                "flags": sorted(k for k, v in styles.items() if v),
             })
         return out
 
